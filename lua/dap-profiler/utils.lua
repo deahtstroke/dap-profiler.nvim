@@ -22,13 +22,13 @@ function M.apply_extmark_to_buf(buf, ns, line, hl)
 	if buf == nil or ns == -1 then
 		return
 	end
-	vim.api.nvim_set_option_value("modifialbe", true, { buf = buf })
+	vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
 	vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
 		hl_group = vim.api.nvim_get_hl_id_by_name(hl),
 		end_line = 0,
 		end_col = #line,
 	})
-	vim.api.nvim_set_option_value("modifialbe", false, { buf = buf })
+	vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
 end
 
 return M

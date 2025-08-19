@@ -1,4 +1,4 @@
-local utils = require("nvim-dap-profiler.utils")
+local utils = require("dap-profiler.utils")
 local dap = require("dap")
 
 local M = {}
@@ -55,8 +55,21 @@ function M.write_help_section(buf)
 	utils.write_to_unmodifiable_buf(buf, lines)
 end
 
+-- Center a string within a given width
+-- @param text	string	The text to center
+-- @param width number	The width of the buffer
+-- @return string				The centered text
+local function center_text(text, width)
+	if text == nil or width <= 0 then
+		return ""
+	end
+
+	local padding = math.floor((width - #text) / 2)
+	return string.rep(" ", padding) .. text
+end
+
 function M.write_main_section(buf, width)
-	local helpLine = utils.center_text({ "Press g? for help", width })
+	local helpLine = center_text("Press g? for help", width)
 	local lines = {
 		helpLine,
 		"",
@@ -74,19 +87,6 @@ function M.write_main_section(buf, width)
 
 	utils.write_to_unmodifiable_buf(buf, lines)
 	utils.apply_extmark_to_buf(buf, ns, helpLine, "Comment")
-end
-
--- Center a string within a given width
--- @param text	string	The text to center
--- @param width number	The width of the buffer
--- @return string				The centered text
-function M.center_text(text, width)
-	if text == nil or width <= 0 then
-		return ""
-	end
-
-	local padding = math.floor((width - #text) / 2)
-	return string.rep(" ", padding) .. text
 end
 
 return M

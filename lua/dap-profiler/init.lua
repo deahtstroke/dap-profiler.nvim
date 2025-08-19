@@ -1,9 +1,10 @@
-local path = "/Users/danielvillavicencio/Projects/nvim-dap-profiler"
-vim.opt.rtp:prepend(path)
-
-local ui = require("nvim-dap-profiler.ui")
+local ui = require("dap-profiler.ui")
 
 local M = {}
+
+M.setup = function()
+	-- nothing
+end
 
 local state = {
 	main = {
@@ -19,7 +20,5 @@ function M.toggle()
 		state.main.buf = result.buf
 	end
 end
-
-vim.api.nvim_create_user_command("DapProfilerOpen", M.toggle, {})
 
 return M
