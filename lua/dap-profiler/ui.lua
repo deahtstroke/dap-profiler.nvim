@@ -1,9 +1,9 @@
 local utils = require("dap-profiler.utils")
 local dap = require("dap")
+local format = require("dap-profiler.format")
+local metadata = require("dap-profiler.metadata")
 
 local M = {}
-
-local ns = vim.api.nvim_create_namespace("dap_profiler")
 
 --- @class window_details
 --- @field id integer Id of the window
@@ -20,12 +20,6 @@ local ns = vim.api.nvim_create_namespace("dap_profiler")
 --- @field left? buffer_details The left buffer details
 --- @field right? buffer_details The right buffer details
 
---- @class ui_state
---- @field windows windows_state The state of the current windows
---- @field buffers buffers_state The state of the buffers
---- @field open boolean Whether the current windows are open or closed
---- @field language_configs table<string, language_configurations> The current dap-language configs
-
 --- @class dap_configuration
 --- @field name string The name of the dap configuration
 
@@ -33,52 +27,77 @@ local ns = vim.api.nvim_create_namespace("dap_profiler")
 --- @field expanded? boolean If the list of configs is expanded
 --- @field dap_configurations? dap_configuration[] List of Dap configurations
 
+---@class ui_state
+---@field windows windows_state The state of the current windows
+---@field buffers buffers_state The state of the buffers
+---@field open boolean The whether the current windows are open or closed
+---@field language_configs table<string, language_configurations> The current dap-language configs
+---@field line_metadata table<integer, line_metadata> The current line metadata
+
 --- @type ui_state
 --- @diagnostic disable missing-fields
 M.state = {
   buffers = {},
   windows = {},
   language_configs = {},
+  line_metadata = {},
   open = false,
 }
 
 local function create_left_buffer()
+  if M.state.buffers.left and vim.api.nvim_buf_is_valid(M.state.buffers.left.id) then
+    return M.state.buffers.left.id
+  end
   local buf = vim.api.nvim_create_buf(true, false)
 
   M.state.buffers.left = { id = buf }
+
+  vim.api.nvim_create_autocmd("CursorMoved", {
+    buffer = M.state.buffers.left.id,
+    callback = function()
+      M.render_right_window_preview()
+    end,
+  })
   return buf
 end
 
 local function create_right_buffer()
+  if M.state.buffers.right and vim.api.nvim_buf_is_valid(M.state.buffers.right.id) then
+    return M.state.buffers.right.id
+  end
   local buf = vim.api.nvim_create_buf(true, false)
 
+  vim.api.nvim_buf_set_name(buf, "dap-profiler://preview")
+  vim.bo[buf].buftype = "acwrite"
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].bufhidden = "hide"
+
   M.state.buffers.right = { id = buf }
+
+  vim.api.nvim_create_autocmd("BufWriteCmd", {
+    buffer = buf,
+    callback = function()
+      local line = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+
+      -- TODO: Parse lines back into M.state.language_configs
+      vim.notify("Saved dap-profiler state", vim.log.levels.INFO)
+    end,
+  })
   return buf
 end
 
-local function close_windows()
-  local left_win_id = M.state.windows.left.id
-  local right_win_id = M.state.windows.right.id
-
-  if
-    (left_win_id == nil or right_win_id == nil)
-    or not vim.api.nvim_win_is_valid(left_win_id)
-    or not vim.api.nvim_win_is_valid(right_win_id)
-  then
-    return
+--- Finds the language for the given configuration name
+--- @return string language The language that a config belongs to
+local function find_lang_for_config(cfg_name)
+  for lang, entry in pairs(M.state.language_configs) do
+    for _, cfg in ipairs(entry.dap_configurations) do
+      if cfg.name == cfg_name then
+        return lang
+      end
+    end
   end
 
-  vim.api.nvim_win_close(M.state.windows.left.id, true)
-  vim.api.nvim_win_close(M.state.windows.right.id, true)
-end
-
-local function center_text(text, width)
-  if text == nil or width <= 0 then
-    return ""
-  end
-
-  local padding = math.floor((width - #text) / 2)
-  return string.rep(" ", padding) .. text
+  return nil
 end
 
 --- @class window_configs
@@ -130,27 +149,27 @@ local function default_window_configs()
   }
 end
 
-function M.toggle_expand()
+function M.toggle_expand_or_select_config()
   local row = vim.api.nvim_win_get_cursor(M.state.windows.left.id)[1]
-  local line = vim.api.nvim_buf_get_lines(M.state.buffers.left.id, row - 1, row, false)[1]
 
-  if not line then
+  local line_metadata = M.state.line_metadata[row]
+  if not line_metadata then
     return
   end
 
-  local symbol, lang = line:match("^(▸) (.+)$")
-  if not symbol then
-    symbol, lang = line:match("^(▾) (.+)$")
-  end
+  local language_config = M.state.language_configs[line_metadata.lang]
 
-  local language_config = M.state.language_configs[lang]
-
-  if lang and symbol and language_config then
+  if line_metadata.type == "lang" then
     language_config.expanded = not language_config.expanded
     M.render()
+  elseif line_metadata.type == "config" then
+    if M.state.windows.right and vim.api.nvim_win_is_valid(M.state.windows.right.id) then
+      vim.api.nvim_set_current_win(M.state.windows.right.id)
+    end
   end
 end
 
+--- Load all DAP configurations saved in memory
 function M.load_configs()
   if M.state.language_configs and next(M.state.language_configs) then
     return
@@ -183,16 +202,23 @@ function M.load_configs()
   end
 end
 
+--- Render all lines needed in each buffer
 function M.render()
   local lines = {}
+  M.state.line_metadata = {}
 
   for lang, config in pairs(M.state.language_configs) do
     local icon = config.expanded and "▾" or "▸"
-    table.insert(lines, icon .. " " .. lang)
+    metadata.insert(M.state.line_metadata, lines, { type = "lang", lang = lang }, icon .. " " .. lang)
 
     if config.expanded then
       for _, cfg in ipairs(config.dap_configurations) do
-        table.insert(lines, "  " .. cfg.name)
+        metadata.insert(
+          M.state.line_metadata,
+          lines,
+          { type = "config", lang = lang, config_name = cfg.name },
+          "   " .. cfg.name
+        )
       end
     end
   end
@@ -200,33 +226,69 @@ function M.render()
   utils.write_to_unmodifiable_buf(M.state.buffers.left.id, lines)
 end
 
---- Create windows with buffers and add them to the `state` global variable
+--- Create windows and buffers, add them to the global state
+--- and render lines in the buffers managed by the state
 --- @return windows_state
-local function open_windows()
-  local configs = default_window_configs()
+function M.open_windows()
+  local win_configs = default_window_configs()
 
   local left_buf = create_left_buffer()
-  local left_window_id = vim.api.nvim_open_win(left_buf, true, configs.left_window)
+  local left_window_id = vim.api.nvim_open_win(left_buf, true, win_configs.left_window)
   vim.api.nvim_set_option_value("cursorline", true, {
     win = left_window_id,
   })
-  M.state.windows.left = { id = left_window_id, config = configs.left_window }
+  M.state.windows.left = { id = left_window_id, config = win_configs.left_window }
 
   local right_buf = create_right_buffer()
-  local right_window_id = vim.api.nvim_open_win(right_buf, false, configs.right_window)
-  M.state.windows.right = { id = right_window_id, config = configs.right_window }
+  local right_window_id = vim.api.nvim_open_win(right_buf, false, win_configs.right_window)
+  M.state.windows.right = { id = right_window_id, config = win_configs.right_window }
 
   M.render()
+
+  M.state.open = true
 end
 
+local function focus_left_window()
+  local curr = vim.api.nvim_get_current_win()
+  if curr ~= M.state.windows.left.id and vim.api.nvim_win_is_valid(M.state.windows.left.id) then
+    vim.api.nvim_set_current_win(M.state.windows.left.id)
+  end
+end
+
+local function focus_right_window()
+  local curr = vim.api.nvim_get_current_win()
+  if curr ~= M.state.windows.right.id and vim.api.nvim_win_is_valid(M.state.windows.right.id) then
+    vim.api.nvim_set_current_win(M.state.windows.right.id)
+  end
+end
+
+--- Close all windows stored in the global state
+function M.close_windows()
+  local left_win_id = M.state.windows.left.id
+  local right_win_id = M.state.windows.right.id
+
+  if
+    (left_win_id == nil or right_win_id == nil)
+    or not vim.api.nvim_win_is_valid(left_win_id)
+    or not vim.api.nvim_win_is_valid(right_win_id)
+  then
+    return
+  end
+
+  vim.api.nvim_win_close(M.state.windows.left.id, true)
+  vim.api.nvim_win_close(M.state.windows.right.id, true)
+
+  M.state.open = false
+end
+
+--- Setup default keymaps for the buffers
 function M.setup_keymaps()
   local close_function = function()
-    close_windows()
+    M.close_windows()
     M.state.open = false
   end
 
-  local exit_keymaps = { "q", "<Esc><Esc>" }
-
+  local exit_keymaps = { "q", "<Esc>" }
   for _, keymap in pairs(exit_keymaps) do
     vim.keymap.set("n", keymap, "", {
       callback = close_function,
@@ -234,36 +296,128 @@ function M.setup_keymaps()
       noremap = true,
       silent = true,
     })
-    vim.keymap.set("n", keymap, "", {
-      callback = close_function,
+    vim.keymap.set("n", keymap, close_function, {
       buffer = M.state.buffers.left.id,
       noremap = true,
       silent = true,
     })
   end
 
+  vim.keymap.set("n", "<Esc>", focus_left_window, {
+    buffer = M.state.buffers.right.id,
+    noremap = true,
+    desc = "Focus left window",
+  })
+
   vim.keymap.set("n", "<CR>", function()
-    M.toggle_expand()
+    M.toggle_expand_or_select_config()
   end, { buffer = M.state.buffers.left.id, noremap = true, silent = true })
+
+  vim.keymap.set("n", "a", function()
+    local row = vim.api.nvim_win_get_cursor(M.state.windows.left.id)[1]
+
+    local line_metadata = M.state.line_metadata[row]
+    if not line_metadata then
+      return
+    end
+
+    if line_metadata.type == "lang" then
+      local new_name = vim.fn.input("New DAP config name: ")
+      if new_name ~= "" then
+        --- @type dap_configuration
+        local config = {
+          name = new_name,
+          type = line_metadata.lang,
+        }
+
+        table.insert(M.state.language_configs[line_metadata.lang].dap_configurations, config)
+        vim.notify("Added config to: " .. line_metadata.lang .. ": " .. new_name, vim.log.levels.INFO)
+        M.render()
+      end
+    elseif line_metadata.type == "config" then
+      local new_name = vim.fn.input("New language name: ")
+      if new_name ~= "" then
+        ---@type dap_configuration
+        local config = {
+          name = new_name,
+        }
+
+        table.insert(M.state.language_configs[line_metadata.lang].dap_configurations, config)
+        M.render()
+        vim.notify("Added config to: " .. line_metadata.lang .. ": " .. new_name, vim.log.levels.INFO)
+      end
+    else
+      vim.notify("No language found under cursor", vim.log.levels.WARN)
+    end
+  end, { buffer = M.state.buffers.left.id })
+
+  vim.keymap.set("n", "d", function()
+    local row = vim.api.nvim_win_get_cursor(M.state.windows.left.id)[1]
+    local line_metadata = M.state.line_metadata[row]
+
+    if not line_metadata then
+      return
+    end
+
+    if line_metadata.type == "config" then
+      local choice = vim.fn.confirm("Are you sure want to delete this config?", "&Yes\n&No", 2)
+      if choice == 1 then
+        local config
+        for i, cfg in ipairs(M.state.language_configs[line_metadata.lang].dap_configurations) do
+          if line_metadata.config_name == cfg.name then
+            table.remove(M.state.language_configs[line_metadata.lang].dap_configurations, i)
+            break
+          end
+        end
+
+        M.render()
+      end
+    end
+  end, { buffer = M.state.buffers.left.id, noremap = true, silent = true })
+end
+
+function M.render_right_window_preview()
+  local row = vim.api.nvim_win_get_cursor(M.state.windows.left.id)[1]
+
+  local line_metadata = M.state.line_metadata[row]
+  if not line_metadata then
+    return
+  end
+
+  local lines = {}
+  if line_metadata.type == "lang" then
+    lines = format.center_block_in_window(
+      M.state.windows.right.id,
+      { "Language: " .. line_metadata.lang, "Expand to see configs." }
+    )
+  elseif line_metadata.type == "config" then
+    for _, cfg in pairs(dap.configurations[line_metadata.lang] or {}) do
+      if line_metadata.config_name == cfg.name then
+        lines = format.pad_lines_space(vim.split(vim.inspect(cfg), "\n"), 1)
+        break
+      end
+    end
+  else
+    lines = format.center_block_in_window(M.state.windows.right.id, { "No configuration selected" })
+  end
+
+  vim.api.nvim_buf_set_lines(M.state.buffers.right.id, 0, -1, false, lines)
 end
 
 --- Toggle the UI, if its closed it will open it and vice-versa
 function M.toggle_profiler()
   if M.state.open then
-    close_windows()
-    M.state.open = false
+    M.close_windows()
     return
   end
 
   M.load_configs()
 
-  open_windows()
+  M.open_windows()
 
   M.render()
 
   M.setup_keymaps()
-
-  M.state.open = true
 end
 
 return M
