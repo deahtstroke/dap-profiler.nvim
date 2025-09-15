@@ -404,7 +404,6 @@ function M.render_right_window_preview()
   vim.api.nvim_buf_set_lines(M.state.buffers.right.id, 0, -1, false, lines)
 end
 
---- Toggle the UI, if its closed it will open it and vice-versa
 function M.toggle_profiler()
   if M.state.open then
     M.close_windows()
