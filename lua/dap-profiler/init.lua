@@ -1,23 +1,17 @@
 local ui = require("dap-profiler.ui")
+local state = require("dap-profiler.state")
+local storage = require("dap-profiler.storage")
 
 local M = {}
+
+state.load_dap_configs()
 
 M.setup = function()
   -- nothing
 end
 
-local state = {
-  main = {
-    buf = -1,
-    win = -1,
-  },
-  expanded = {},
-}
-
 function M.toggle()
-  if not vim.api.nvim_win_is_valid(state.main.win) then
-    ui.toggle_profiler()
-  end
+  ui.toggle()
 end
 
 return M

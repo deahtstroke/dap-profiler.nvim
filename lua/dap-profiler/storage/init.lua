@@ -4,7 +4,7 @@ local data_dir = vim.fn.stdpath("data")
 local profiles_file = data_dir .. "profiles.json"
 
 ---Load dap-profiles from storage
----@return table<string, dap_configuration[]> managed_profiles
+---@return table<string, DapConfiguration[]> managed_profiles
 function M.load_from_storage()
   local file = io.open(profiles_file, "r")
   if not file then
@@ -24,7 +24,7 @@ function M.load_from_storage()
 end
 
 ---Write a table of dap_configurations to JSON
----@param profiles table<string, dap_configuration[]>
+---@param profiles table<string, DapConfiguration[]>
 function M.write_profiles(profiles)
   vim.fn.mkdir(data_dir, "p")
 

@@ -1,0 +1,11 @@
+---@class DapConfigurationGo
+---@field name string
+---@field type string
+---@field request "launch|attach"
+---@field mode? string
+---@field program? string|fun():string
+---@field cwd? string[]
+---@field env? table<string, string>
+---@field buildFlags? string
+---@field substitutePath? { from: string, to: string }[]
+---@field [string] any
