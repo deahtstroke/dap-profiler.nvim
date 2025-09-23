@@ -6,7 +6,7 @@ local utils = require("dap-profiler.ui.utils.format")
 local function render_right_window_preview()
   local row = vim.api.nvim_win_get_cursor(state.get().windows.left.id)[1]
 
-  local line_metadata = state.get().line_metadata[row]
+  local line_metadata = state.get().metadata[row]
   if not line_metadata then
     return
   end
@@ -18,22 +18,10 @@ local function render_right_window_preview()
       { "Language: " .. line_metadata.lang, "Expand to see configs." }
     )
   elseif line_metadata.type == "config" then
-    local dap_configs = state.get().language_configs[line_metadata.lang].dap_configurations or {}
+    local dap_configs = state.get().languages[line_metadata.lang].dapProfiles or {}
     for _, cfg in pairs(dap_configs) do
       if line_metadata.config_name == cfg.name then
-        local lines_out = {}
-        -- Render key-value pairs from dap config
-        for _, value in pairs(cfg) do
-          local val_str
-          if type(value) == "table" then
-            val_str = vim.inspect(value)
-          else
-            val_str = tostring(value)
-          end
-          table.insert(lines_out, val_str)
-        end
-
-        lines = utils.pad_lines_space(lines_out, 1)
+        lines = utils.pad_lines_space(vim.split(vim.inspect(cfg), "\n"), 1)
         break
       end
     end
@@ -76,6 +64,7 @@ function M.create_right_buffer()
   vim.bo[buf].buftype = "acwrite"
   vim.bo[buf].swapfile = false
   vim.bo[buf].bufhidden = "hide"
+  vim.bo[buf].filetype = "lua"
 
   state.get().buffers.right = { id = buf }
 

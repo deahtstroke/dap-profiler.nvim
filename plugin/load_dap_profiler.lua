@@ -1,4 +1,6 @@
 vim.api.nvim_create_user_command("DapProfilerToggle", function()
-  package.loaded["dap-profiler"] = nil
-  require("dap-profiler").toggle()
+  require("dap-profiler.state").load_dap_configs()
+
+  require("dap-profiler.keymaps")
+  require("dap-profiler.ui").toggle()
 end, {})

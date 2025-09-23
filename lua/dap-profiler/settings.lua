@@ -7,7 +7,9 @@ local defaults = {
       toggle_expand_or_select = "<CR>",
       add_config = "a",
       add_language = "A",
-      delete_action = "d",
+      delete = "d",
+      close = "<ESC>",
+      force_close = "q",
     },
   },
 }

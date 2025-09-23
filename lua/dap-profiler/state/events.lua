@@ -2,6 +2,8 @@ local M = {}
 
 ---List of all possible events that could fire off on a user action in the profiler
 ---@alias ProfilerEvent
+---| "language_added"
+---| "language_deleted"
 ---| "config_added"
 ---| "config_deleted"
 ---| "config_renamed"
@@ -9,6 +11,8 @@ local M = {}
 ---| "profiler_open"
 ---| "profiler_close"
 M.ProfilerEvent = {
+  LanguageAdded = "language_added",
+  LanguageDeleted = "language_deleted",
   ConfigAdded = "config_added",
   ConfigDeleted = "config_deleted",
   ConfigRenamed = "config_renamed",

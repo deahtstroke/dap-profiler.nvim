@@ -21,14 +21,14 @@ local ProfilerEvent = require("dap-profiler.state.events").ProfilerEvent
 
 --- @class LanguageConfigurations
 --- @field expanded? boolean If the list of configs is expanded
---- @field dap_configurations? DapConfiguration[] List of Dap configurations
+--- @field dapProfiles? DapConfiguration[] List of Dap configurations
 
 ---@class StateContainer
 ---@field windows WindowState The state of the current windows
 ---@field buffers BufferState The state of the buffers
 ---@field open boolean The whether the current windows are open or closed
----@field language_configs table<string, LanguageConfigurations> The current dap-language configs
----@field line_metadata table<integer, LineMetadata> The current line metadata
+---@field languages table<string, LanguageConfigurations> The current dap-language configs
+---@field metadata table<integer, LineMetadata> Metadata for each line in the left-panel
 ---@field events EventEmitter
 local State = {}
 State.__index = State
@@ -37,10 +37,10 @@ State.__index = State
 ---@return StateContainer
 function State:new()
   return setmetatable({
-    line_metadata = {},
+    metadata = {},
     buffers = {},
     windows = {},
-    language_configs = {},
+    languages = {},
     open = false,
     events = require("dap-profiler.state.events").EventEmitter:new(),
   }, self)
@@ -58,7 +58,7 @@ end
 --- Load all DAP configurations
 function M.load_dap_configs()
   local dap = require("dap")
-  if state.language_configs and next(state.language_configs) then
+  if state.languages and next(state.languages) then
     return
   end
 
@@ -67,40 +67,45 @@ function M.load_dap_configs()
     return
   end
 
-  state.language_configs = state.language_configs or {}
-
-  function M.toggle_expand_or_select_config()
-    local row = vim.api.nvim_win_get_cursor(state.windows.left.id)[1]
-
-    local line_metadata = state.line_metadata[row]
-    if not line_metadata then
-      return
-    end
-
-    local language_config = state.language_configs[line_metadata.lang]
-
-    if line_metadata.type == "lang" then
-      language_config.expanded = not language_config.expanded
-    elseif line_metadata.type == "config" then
-      if state.windows.right and vim.api.nvim_win_is_valid(state.windows.right.id) then
-        vim.api.nvim_set_current_win(state.windows.right.id)
-      end
-    end
-  end
+  state.languages = state.languages or {}
 
   for lang, configs in pairs(dap.configurations) do
     --- @type LanguageConfigurations
     local entry = {
       expanded = false,
-      dap_configurations = {},
+      dapProfiles = {},
     }
 
     for _, cfg in ipairs(configs) do
+      ---@type DapConfiguration
+      print(vim.inspect(cfg))
       local config = vim.deepcopy(cfg, true)
-      table.insert(entry.dap_configurations, config)
+      table.insert(entry.dapProfiles, config)
     end
 
-    state.language_configs[lang] = entry
+    state.languages[lang] = entry
+  end
+  print(vim.inspect(state.languages["sh"]))
+end
+
+---Toggle expand or select a config depending on what metadata line user selected
+function M.toggle_expand_or_select_config()
+  local row = vim.api.nvim_win_get_cursor(state.windows.left.id)[1]
+
+  local metadata = state.metadata[row]
+  if not metadata then
+    return
+  end
+
+  local language_config = state.languages[metadata.lang]
+
+  if metadata.type == "lang" then
+    language_config.expanded = not language_config.expanded
+    state.events:emit(ProfilerEvent.ProfilerTreeExpand)
+  elseif metadata.type == "config" then
+    if state.windows.right and vim.api.nvim_win_is_valid(state.windows.right.id) then
+      vim.api.nvim_set_current_win(state.windows.right.id)
+    end
   end
 end
 
@@ -119,10 +124,10 @@ function M.add_line(metadata_table, lines, meta, line)
 end
 
 ---Add a config to the state
-function M.add_config()
+function M.add_configuration()
   local row = vim.api.nvim_win_get_cursor(state.windows.left.id)[1]
 
-  local line_metadata = state.line_metadata[row]
+  local line_metadata = state.metadata[row]
   if not line_metadata then
     return
   end
@@ -136,19 +141,19 @@ function M.add_config()
         type = line_metadata.lang,
       }
 
-      table.insert(state.language_configs[line_metadata.lang].dap_configurations, config)
+      table.insert(state.languages[line_metadata.lang].dapProfiles, config)
       vim.notify("Added config to: " .. line_metadata.lang .. ": " .. new_name, vim.log.levels.INFO)
       state.events:emit(ProfilerEvent.ConfigAdded)
     end
   elseif line_metadata.type == "config" then
-    local new_name = vim.fn.input("New language name: ")
+    local new_name = vim.fn.input("New DAP config name for " .. line_metadata.lang .. ": ")
     if new_name ~= "" then
       ---@type DapConfiguration
       local config = {
         name = new_name,
       }
 
-      table.insert(state.language_configs[line_metadata.lang].dap_configurations, config)
+      table.insert(state.languages[line_metadata.lang].dapProfiles, config)
       vim.notify("Added config to: " .. line_metadata.lang .. ": " .. new_name, vim.log.levels.INFO)
       state.events:emit(ProfilerEvent.ConfigAdded)
     end
@@ -157,4 +162,50 @@ function M.add_config()
   end
 end
 
+function M.add_language()
+  local new_lang = vim.fn.input("New DAP language: ")
+  if new_lang ~= "" then
+    ---@type LanguageConfigurations
+    local config = {
+      expanded = false,
+      dapProfiles = {},
+    }
+
+    if not state.languages[new_lang] then
+      state.languages[new_lang] = config
+      vim.notify("Added DAP language: " .. new_lang, vim.log.levels.INFO)
+      state.events:emit(ProfilerEvent.LanguageAdded)
+      return
+    end
+  end
+end
+
+function M.delete()
+  local row = vim.api.nvim_win_get_cursor(M.state.windows.left.id)[1]
+  local line_metadata = M.state.line_metadata[row]
+
+  if not line_metadata then
+    return
+  end
+
+  if line_metadata.type == "config" then
+    local choice = vim.fn.confirm("Are you sure want to delete this config?", "&Yes\n&No", 2)
+    if choice == 1 then
+      for i, cfg in ipairs(state.languages[line_metadata.lang].dapProfiles) do
+        if line_metadata.config_name == cfg.name then
+          table.remove(state.languages[line_metadata.lang].dapProfiles, i)
+          state.events:emit(ProfilerEvent.ConfigDeleted)
+          return
+        end
+      end
+    end
+  elseif line_metadata.type == "language" then
+    local choice = vim.fn.confirm("Are you sure want to delete all configs under this language?", "&Yes\n&No", 2)
+    if choice == 1 then
+      state.languages[line_metadata.lang] = nil
+      state.events:emit(ProfilerEvent.LanguageDeleted)
+      return
+    end
+  end
+end
 return M
